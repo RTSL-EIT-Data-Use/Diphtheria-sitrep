@@ -1,0 +1,373 @@
+---
+title: "Diphtheria Sitrep - PowerPoint (static / embedded) build"
+output: html_document
+params:
+  report_date: null
+editor_options:
+  chunk_output_type: console
+---
+
+<!--
+================================================================================
+ diph_sitrep_pptx.Rmd
+--------------------------------------------------------------------------------
+ Companion to diph_sitrep.qmd / .Rmd. Builds a STATIC PowerPoint deck in which
+ every figure/table is EMBEDDED directly (no external links, no "Update Links"
+ step). Re-run this file (or source 00_Run the report.R) to regenerate the deck.
+
+ Approach (approved):
+   * Single officer build (one engine).
+   * Title slide + Highlights slide  = NATIVE, EDITABLE PowerPoint text.
+   * Summary table, epicurve, map, pyramid, CFR, trend, cumulative table
+                                     = pixel-placed EMBEDDED images.
+   * Slide titles are AUTO-DERIVED from the fig/table title objects in
+     0_header.R (single source of truth), with the "Figure N:/Table N:" prefix
+     and trailing week/year tokens stripped.
+   * Template: presentations/templates/NCDC template.pptx (layouts/masters
+     reused; its own example slides are removed at build time and rebuilt from
+     the R outputs).
+
+ Output: presentations/Diphtheria_Sitrep_<YYYY>_W<##>.pptx
+ (the linked deck keeps the "_linked" suffix, so the two never collide).
+
+ The HTML that this Rmd knits to is just a build log; the real deliverable is
+ the .pptx written to presentations/.
+================================================================================
+-->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include = TRUE, warning = FALSE,
+                      message = FALSE, dpi = 300)
+
+# ---- report_date ------------------------------------------------------------
+# Resolve report_date: prefer the knit param (rmarkdown::render), fall back to a
+# report_date already in the environment (e.g. set by 00_Run the report.R or a
+# plain knitr::knit), else stop. Robust whether or not `params` exists.
+.rd <- NULL
+if (exists("params") && !is.null(params$report_date)) {
+  .rd <- params$report_date
+} else if (exists("report_date")) {
+  .rd <- report_date
+}
+if (is.null(.rd))
+  stop("report_date not supplied - pass it via params (rmarkdown::render(..., ",
+       "params = list(report_date = ...))) or define it before knitting.")
+report_date <- as.Date(.rd)
+
+# Source the SAME scripts in the SAME order as the sitrep, so every figure,
+# Source all the scripts
+source(here::here("scripts", "0_functions.R"))
+source(here::here("scripts", "0_style.R"))
+source(here::here("scripts", "0_header.R"))
+# source(here::here("scripts", "2_summary.R"))
+source(here::here("scripts", "1_import_data.R"))
+source(here::here("scripts", "2_data_cleaning.R"))
+source(here::here("scripts", "3_create_summary_table.R"))
+source(here::here("scripts", "4_epicurve.R"))
+source(here::here("scripts", "5_map_cases.R"))
+source(here::here("scripts", "6_pyramid.R"))
+source(here::here("scripts", "7_cfr.R"))
+source(here::here("scripts", "8_trend.R"))
+source(here::here("scripts", "9_cumm_table.R"))
+source(here::here("scripts", "highlights.R"))
+source(here::here("scripts", "13_Vaccination.R"))
+
+suppressPackageStartupMessages({
+  library(officer)
+  library(ggplot2)
+  library(flextable)
+  library(ragg)
+  library(png)
+})
+```
+
+```{r build}
+# =============================================================================
+# 1. Constants
+# =============================================================================
+template_path <- here::here("presentations", "templates", "NCDC template.pptx")
+
+master_name   <- "NCDC Template (Training Module)"  # the branded master
+layout_title  <- "Title Slide with Sub-heading"
+layout_body   <- "Title and Content"
+
+# Safe image box (inches). Sits just below the title placeholder (which ends at
+# ~1.85in) so a 1-2 line auto-derived title never overlaps the image.
+BOX <- list(left = 0.60, top = 1.90, width = 12.13, height = 4.75)
+
+img_dir <- file.path(tempdir(), "diph_pptx_img")  # temp: images are embedded,
+if (!dir.exists(img_dir)) dir.create(img_dir)     # so nothing lingers on disk
+
+# =============================================================================
+# 2. Helpers
+# =============================================================================
+
+# ragg-based ggsave (default png() on Windows can render a black bottom half).
+save_plot <- function(plot_obj, file, w, h, dpi = 200) {
+  path <- file.path(img_dir, file)
+  ggplot2::ggsave(path, plot = plot_obj, width = w, height = h, units = "in",
+                  dpi = dpi, bg = "white", device = ragg::agg_png)
+  path
+}
+
+save_ft <- function(ft, file) {
+  path <- file.path(img_dir, file)
+  flextable::save_as_image(x = ft, path = path)
+  path
+}
+
+# Native pixel dimensions of a PNG, in inches (assuming it was written at `dpi`).
+img_dim_in <- function(path, dpi = 200) {
+  d <- dim(png::readPNG(path))          # rows (height px), cols (width px)
+  list(w = d[2] / dpi, h = d[1] / dpi)
+}
+
+# Fit (w_in x h_in) inside BOX preserving aspect ratio; centre horizontally,
+# anchor to the top of the box. Returns a ph_location.
+fit_location <- function(w_in, h_in, box = BOX) {
+  s   <- min(box$width / w_in, box$height / h_in)
+  w   <- w_in * s
+  h   <- h_in * s
+  ph_location(left  = box$left + (box$width - w) / 2,
+              top   = box$top,
+              width = w, height = h)
+}
+
+# Place a pre-sized image that already matches the box aspect (fills the box).
+loc_fill <- function() ph_location(left = BOX$left, top = BOX$top,
+                                   width = BOX$width, height = BOX$height)
+
+# Trim near-white whitespace from a PNG: (1) crop to non-white bounding box,
+# (2) collapse tall interior all-white bands (e.g. gap above a map scale bar).
+trim_white <- function(path, pad = 8, tol = 250/255, max_gap = 18) {
+  img <- png::readPNG(path)
+  if (length(dim(img)) != 3) return(invisible(NULL))
+  vis <- !(img[,,1] >= tol & img[,,2] >= tol & img[,,3] >= tol)
+  if (!any(vis)) return(invisible(NULL))
+  rows <- which(apply(vis, 1, any)); cols <- which(apply(vis, 2, any))
+  H <- nrow(vis); W <- ncol(vis)
+  r1 <- max(1, min(rows) - pad); r2 <- min(H, max(rows) + pad)
+  c1 <- max(1, min(cols) - pad); c2 <- min(W, max(cols) + pad)
+  img <- img[r1:r2, c1:c2, , drop = FALSE]
+  H2 <- nrow(img)
+  white_row <- apply(img[,,1] >= tol & img[,,2] >= tol & img[,,3] >= tol, 1, all)
+  keep <- rep(TRUE, H2); i <- 1L; removed <- 0L
+  while (i <= H2) {
+    if (white_row[i]) {
+      s <- i; while (i <= H2 && white_row[i]) i <- i + 1L; e <- i - 1L
+      gap <- e - s + 1L
+      if (gap > max_gap) {
+        excess <- gap - max_gap; mid <- s + max_gap %/% 2L
+        keep[seq.int(mid, length.out = excess)] <- FALSE; removed <- removed + excess
+      }
+    } else i <- i + 1L
+  }
+  if (removed > 0L) img <- img[keep, , , drop = FALSE]
+  png::writePNG(img, target = path)
+}
+
+# Turn a fig/table title object into a slide title: drop "Figure N:/Table N:"
+# and peel trailing week / year / "YYYY cumulative through week N" / range /
+# "for YYYY" tokens until stable.
+clean_title <- function(x) {
+  t <- if (inherits(x, "ftext")) x$value else as.character(x)
+  t <- sub("^\\s*(Figure|Table)\\s*\\d+\\s*[:.]?\\s*", "", t, ignore.case = TRUE)
+  repeat {
+    before <- t
+    t <- sub("[,;]?\\s*\\d{4}\\s*cumulative\\s*through\\s*(epi\\s*)?week\\s*\\d+\\s*$",
+             "", t, ignore.case = TRUE)
+    t <- sub("[,;]?\\s*\\d{4}\\s*[-–]\\s*\\d{4}\\s*$", "", t)   # 2022 - 2026
+    t <- sub("\\s*for\\s*\\d{4}\\s*$", "", t, ignore.case = TRUE)     # for 2026
+    t <- sub("[,;]?\\s*(epi\\s*)?week\\s*\\d+\\s*$", "", t, ignore.case = TRUE)
+    t <- sub("[,;]?\\s*\\d{4}\\s*$", "", t)                          # trailing year
+    t <- sub("[[:space:],;.]+$", "", t)   # trailing punctuation/space only
+    if (identical(before, t)) break
+  }
+  # Interior cleanup: some titles embed the week/year mid-string (e.g. the
+  # summary table). Drop interior "week N" and year tokens, then tidy the
+  # empty comma slots they leave behind, so the slide title stays to <=2 lines.
+  t <- gsub("\\s*(epi\\s*)?week\\s*\\d+", "", t, ignore.case = TRUE)
+  t <- gsub("\\s*\\b(19|20)\\d{2}\\b", "", t)
+  t <- gsub("\\s*,(\\s*,)+", ",", t)     # collapse ", ,"/", , ," runs
+  t <- gsub("\\s+,", ",", t)
+  t <- gsub("\\s{2,}", " ", t)
+  t <- sub("^[[:space:],;.]+", "", t)
+  t <- sub("[[:space:],;.]+$", "", t)
+  trimws(t)
+}
+
+# =============================================================================
+# 3. Export figures / tables to (temp) PNGs
+# =============================================================================
+# PPT-only font bump for the charts (slides 4, 6-8): axis titles, axis text,
+# legend text and legend title all to 14 pt. Applied here so it affects the
+# deck only - the Word report re-renders the same objects without this override.
+# `+ theme()` overrides size only and keeps each chart's bold/angle/colour.
+bump <- theme(
+  axis.title   = element_text(size = 14),
+  axis.text    = element_text(size = 14),
+  legend.text  = element_text(size = 14),
+  legend.title = element_text(size = 14)
+)
+
+# ggplots that fill the box (rendered at the box aspect):
+p_epicurve <- save_plot(epicurve         + bump, "epicurve.png", BOX$width, BOX$height)
+p_vacc_sta <- save_plot(vacc_sta_2026         + bump, "vacc_sta.png", BOX$width, BOX$height)
+p_pyramid  <- save_plot(age_pyramid_plot + bump, "pyramid.png",  BOX$width, BOX$height)
+p_cfr      <- save_plot(combo_chart      + bump, "cfr.png",      BOX$width, BOX$height)
+p_trend    <- save_plot(trend_year_plot  + bump, "trend.png",    BOX$width, BOX$height)
+
+# map (slide 5): NOT bumped. Render near-square, then trim whitespace and fit.
+p_map      <- save_plot(diph_map,         "map.png",        8.5, BOX$height)
+trim_white(p_map)
+
+# Summary table (slide 2): rasterised image. PPT-only tweaks so the two-line
+# "States & LGAs affected" header and its "States: X / LGAs: Y" cells don't
+# overlap: widen that column and open up the line spacing. (Word untouched.)
+# Column widths tuned so every header fits on TWO lines (no 3-4 line wrapping),
+# which also shortens the header row. Widths are relative (the image is scaled
+# to the slide), sized for the widest header line in each column:
+#          Reporting Suspected Confirmed (suspected) CaseFatality States&LGAs
+summary_w <- c(0.95,     0.95,     0.95,     1.10,       1.30,        1.30)
+summary_ppt <- Summary_table_ft |>
+  flextable::line_spacing(space = 1.3, part = "all") |>
+  flextable::width(j = 1:6, width = summary_w) |>
+  flextable::fix_border_issues()
+p_summary  <- save_ft(summary_ppt, "summary.png")
+
+# Monthly table (slide 9): rasterised image, same approach as summary table.
+# Column widths tuned so headers fit on two lines without wrapping to three.
+#           Month  Epi-Wks  Suspected  Deaths  CFR    States  LGAs
+# monthly_w <- c(0.90,  0.80,    1.10,     0.80,   0.90,  1.10,   1.00)
+# monthly_ppt <- monthly_diph_tbl |>
+#   flextable::line_spacing(space = 1.3, part = "all") |>
+#   flextable::width(j = 1:7, width = monthly_w) |>
+#   flextable::fix_border_issues()
+# p_monthly <- save_ft(monthly_ppt, "monthly.png")
+
+# =============================================================================
+# 4. Slide titles (auto-derived) and subtitle
+# =============================================================================
+main_title <- "Diphtheria Situation Report"
+sub_title  <- paste0(week_n, ": ", week_period)   # mirrors the Word title row 2
+
+ttl_summary <- clean_title(table1)      # inner ftext of table1_title
+ttl_epi     <- clean_title(fig1_title)
+ttl_vacc     <- clean_title(fig2_title)
+ttl_map     <- clean_title(fig3_title)
+ttl_pyr     <- clean_title(fig4_title)
+ttl_cfr     <- clean_title(fig5_title)
+ttl_trend   <- clean_title(fig6_title)
+# ttl_monthly <- clean_title(table2)     # monthly indicators table
+
+# Highlights: same lines as the report (glue objects coerced to character),
+# plus the standing TWG line that the Rmd hard-codes.
+highlight_lines <- c(
+  as.character(highlight1), as.character(highlight2), as.character(highlight3),
+  as.character(highlight4), as.character(highlight5), as.character(highlight6),
+  as.character(highlight7),
+  paste0("National Diphtheria multi-partner, multi-sectoral Technical Working ",
+         "Group (TWG) continues coordinating the response activities at all levels")
+)
+
+mk_bullets <- function(lines, size = 17) {
+  ft <- fp_text(font.family = "Arial", font.size = size, color = "#000000")
+  pp <- fp_par(text.align = "left", padding.bottom = 8)
+  do.call(block_list,
+          lapply(lines, function(s) fpar(ftext(paste0("•  ", s), ft), fp_p = pp)))
+}
+
+# =============================================================================
+# 5. Build the deck
+# =============================================================================
+doc <- read_pptx(template_path)
+
+# Remove the template's own example slides; keep its masters/layouts.
+while (length(doc) > 0) doc <- remove_slide(doc, index = 1)
+
+add_img <- function(doc, title, path, fill = FALSE) {
+  loc <- if (fill) loc_fill() else { d <- img_dim_in(path); fit_location(d$w, d$h) }
+  doc <- add_slide(doc, layout = layout_body, master = master_name)
+  doc <- ph_with(doc, value = title, location = ph_location_type("title"))
+  ph_with(doc, value = external_img(path), location = loc, use_loc_size = TRUE)
+}
+
+# --- Slide 1: title (native text) --------------------------------------------
+doc <- add_slide(doc, layout = layout_title, master = master_name)
+doc <- ph_with(doc, value = main_title, location = ph_location_type("ctrTitle"))
+doc <- ph_with(doc, value = sub_title,  location = ph_location_type("subTitle"))
+
+# --- Slide 2: summary table (image) + linked footnote ------------------------
+# Fit the table into the safe box (top-anchored, centred) and remember its
+# placed height so the footnote can sit directly beneath it.
+s2_dim <- img_dim_in(p_summary)
+s2_scl <- min(BOX$width / s2_dim$w, BOX$height / s2_dim$h)
+s2_w   <- s2_dim$w * s2_scl
+s2_h   <- s2_dim$h * s2_scl
+s2_l   <- BOX$left + (BOX$width - s2_w) / 2
+doc <- add_slide(doc, layout = layout_body, master = master_name)
+doc <- ph_with(doc, value = ttl_summary, location = ph_location_type("title"))
+doc <- ph_with(doc, value = external_img(p_summary),
+               location = ph_location(left = s2_l, top = BOX$top,
+                                      width = s2_w, height = s2_h),
+               use_loc_size = TRUE)
+# Footnote pinned near the bottom of the slide, just above the green footer bar
+# (which starts at ~6.9in). Text comes from footnote_confirmed (0_header.R), so
+# editing it there updates the report AND this slide.
+doc <- ph_with(doc,
+               value = fpar(ftext(paste0("¹ ", footnote_confirmed),
+                                  fp_text(font.family = "Arial", font.size = 14,
+                                          italic = TRUE, color = "#000000"))),
+               location = ph_location(left = s2_l, top = 6.55,
+                                      width = s2_w, height = 0.30))
+
+# --- Slide 3: highlights (native editable text) ------------------------------
+doc <- add_slide(doc, layout = layout_body, master = master_name)
+doc <- ph_with(doc, value = "Highlights", location = ph_location_type("title"))
+doc <- ph_with(doc, value = mk_bullets(highlight_lines),
+               location = ph_location(left = BOX$left, top = BOX$top,
+                                      width = BOX$width, height = BOX$height))
+
+# --- Slides 4-8: figures (images) --------------------------------------------
+doc <- add_img(doc, ttl_epi,   p_epicurve, fill = TRUE)
+doc <- add_img(doc, ttl_vacc,   p_vacc_sta, fill = TRUE)
+doc <- add_img(doc, ttl_map,   p_map)                 # fitted (trimmed, centred)
+doc <- add_img(doc, ttl_pyr,   p_pyramid,  fill = TRUE)
+doc <- add_img(doc, ttl_cfr,   p_cfr,      fill = TRUE)
+doc <- add_img(doc, ttl_trend, p_trend,    fill = TRUE)
+
+# # --- Slide 9: monthly indicators table (image) -------------------------------
+# m9_dim <- img_dim_in(p_monthly)
+# m9_scl <- min(BOX$width / m9_dim$w, BOX$height / m9_dim$h)
+# m9_w   <- m9_dim$w * m9_scl
+# m9_h   <- m9_dim$h * m9_scl
+# m9_l   <- BOX$left + (BOX$width - m9_w) / 2
+# doc <- add_slide(doc, layout = layout_body, master = master_name)
+# doc <- ph_with(doc, value = ttl_monthly, location = ph_location_type("title"))
+# doc <- ph_with(doc, value = external_img(p_monthly),
+#                location = ph_location(left = m9_l, top = BOX$top,
+#                                       width = m9_w, height = m9_h),
+#                use_loc_size = TRUE)
+
+# --- Slide 10-11: key activities and recommendations -------------------------
+doc <- add_slide(doc, layout = layout_body, master = master_name)
+doc <- ph_with(doc, value = "Key activities", location = ph_location_type("title"))
+doc <- ph_with(doc, value = "",               location = ph_location_type("body"))
+
+doc <- add_slide(doc, layout = layout_body, master = master_name)
+doc <- ph_with(doc, value = "Recommendations and challenges", location = ph_location_type("title"))
+doc <- ph_with(doc, value = "",               location = ph_location_type("body"))
+
+# =============================================================================
+# 6. Save
+# =============================================================================
+out_name <- paste0("Diphtheria_Sitrep_",
+                   lubridate::isoyear(report_date), "_W",
+                   sprintf("%02d", lubridate::isoweek(report_date)), ".pptx")
+out_path <- here::here("presentations", out_name)
+print(doc, target = out_path)
+message("PowerPoint written to: ", out_path)
+```
+
+**Static PowerPoint built:** `` `r out_name` `` (`r length(doc)` slides) in the `report/` folder.
+Re-run `00_Run the report.R` (or knit this file) after changing `report_date` to refresh it.

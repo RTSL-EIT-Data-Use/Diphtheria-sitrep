@@ -1,0 +1,154 @@
+---
+title: ""
+# author: "National Cholera Technical Working Group"
+# date: "`r Sys.Date()`"
+output:
+  officedown::rdocx_document:
+    reference_docx: SitReptemplate.docx
+    plots:
+      style: Normal
+# editor_options: 
+#   chunk_output_type: console
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, include=T, warning=F, message = F, dpi = 300)
+
+# Source all the scripts
+source(here::here("scripts", "0_functions.R"))
+source(here::here("scripts", "0_style.R"))
+source(here::here("scripts", "0_header.R"))
+# source(here::here("scripts", "2_summary.R"))
+source(here::here("scripts", "1_import_data.R"))
+source(here::here("scripts", "2_data_cleaning.R"))
+source(here::here("scripts", "3_create_summary_table.R"))
+source(here::here("scripts", "4_epicurve.R"))
+source(here::here("scripts", "5_map_cases.R"))
+source(here::here("scripts", "6_pyramid.R"))
+source(here::here("scripts", "7_cfr.R"))
+source(here::here("scripts", "8_trend.R"))
+source(here::here("scripts", "9_cumm_table.R"))
+source(here::here("scripts", "highlights.R"))
+source(here::here("scripts", "13_Vaccination.R"))
+```
+
+```{r ncdc}
+ncdc
+```
+
+```{r title}
+title
+```
+
+```{r highlight}
+key_points
+header_par
+```
+
+```{r}
+table1_title
+```
+
+```{r}
+Summary_table_ft
+```
+
+&nbsp;
+&nbsp;
+
+
+```{r}
+highlight
+```
+ 
+ 
+- `r highlight1`^[`r footnote_confirmed`]
+
+- `r highlight2`
+  
+- `r highlight3`
+  
+- `r highlight4`
+
+- `r highlight5`
+  
+- `r highlight6`
+  
+- `r highlight7`
+  
+- National Diphtheria multi-partner, multi-sectoral Technical Working Group (TWG)                  continues coordinating the response activities at all levels
+
+\newpage
+
+```{r fig.width=6.8, fig.height=3.5}
+epicurve
+fig1_title
+```
+
+&nbsp;
+&nbsp;
+
+
+```{r fig.width=6.8, fig.height=3.5}
+vacc_sta_2026
+fig2_title
+```
+
+\newpage
+
+```{r fig.width=6.8, fig.height=4.5}
+# Map chunk uses a taller fig.height so Nigeria fills the page and the
+# manual scale bar (drawn inside the map at lat ~3.85) sits flush against
+# the southern coast with no whitespace.
+diph_map
+fig3_title
+```
+
+
+&nbsp;
+&nbsp;
+
+
+```{r fig.width=6.8, fig.height=4}
+age_pyramid_plot
+fig4_title
+```
+
+\newpage
+
+```{r fig.width=6.8, fig.height=4}
+combo_chart
+fig5_title
+```
+
+&nbsp;
+&nbsp;
+
+```{r fig.width=6.8, fig.height=4}
+trend_year_plot
+fig6_title
+
+```
+
+\newpage
+
+```{r}
+table2_title
+cumm_table
+```
+
+&nbsp;
+
+```{r}
+chall
+```
+ 
+&nbsp;
+  
+```{r}
+recomm
+```
+ 
+-
+-

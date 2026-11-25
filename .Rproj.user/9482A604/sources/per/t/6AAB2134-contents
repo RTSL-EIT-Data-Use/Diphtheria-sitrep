@@ -1,0 +1,56 @@
+###############################################################################
+######                    Diphtheria Sitrep                 ###### 
+###############################################################################
+
+########################### 1. Update User input ###############################
+
+## 1. Enter any date within the week you'd like to generate the report for
+report_date <- as.Date("2026-07-03")
+
+
+########################## 2. Generate the SitRep (RMD) #############################
+
+#Generated report should be saved under "report" folder in this directory.
+rmarkdown::render(here::here('scripts', 'diph_sitrep.Rmd'),
+                 output_file = here::here("report",
+                                          paste0("Diphtheria_Sitrep_",
+                                                 lubridate::isoyear(report_date), "_W",
+                                                 sprintf("%02d", lubridate::isoweek(report_date)),
+                                                 ".docx")))
+
+
+########################### 3. Static PowerPoint deck (RMD) #####################
+
+# Build the static PowerPoint (one slide per figure/table; every image is embedded directly)
+rmarkdown::render(
+  input       = here::here('scripts', 'diph_sitrep_pptx.Rmd'),
+  output_file = file.path(tempdir(), "diph_pptx_build_log.html"),
+  params      = list(report_date = as.character(report_date)),
+  quiet       = TRUE)
+
+
+########################### 4. Data-quality checks #####################
+
+# Print the data-quality warnings collected during report generation.
+source(here::here("scripts", "10_print_data_checks.R"))
+
+
+######################### 2a. Generate the SitRep (QUARTO ALTERNATIVE) #####################
+
+# Build the output filename (same convention as before)
+out_name <- paste0("Diphtheria_Sitrep_",
+                   lubridate::isoyear(report_date), "_W",
+                   sprintf("%02d", lubridate::isoweek(report_date)),
+                   ".docx")
+
+# Render the Quarto document. report_date is passed to Quarto's fresh
+# R session as a parameter (read by the setup chunk in chol_sitrep.qmd).
+quarto::quarto_render(
+  input          = here::here('scripts', 'diph_sitrep.qmd'),
+  output_file    = out_name,
+  execute_params = list(report_date = as.character(report_date)))
+
+# quarto_render writes next to the .qmd (scripts/); move it into report/
+invisible(file.rename(here::here("scripts", out_name),
+                      here::here("report",  out_name)))
+

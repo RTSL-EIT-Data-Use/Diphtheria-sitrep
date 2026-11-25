@@ -1,0 +1,151 @@
+---
+title: ""
+format:
+  docx:
+    reference-doc: SitReptemplate.docx
+params:
+  report_date: null
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, include=T, warning=F, message = F, dpi = 300)
+
+# ---------------------------------------------------------------------------
+# report_date
+# The .Rmd relied on report_date already existing in the global environment
+# (00_Run the report.R defined it before rmarkdown::render). Quarto renders in
+# a fresh R session that cannot see that global, so the date is passed in as a
+# parameter: 00_Run the report.R calls
+#   quarto::quarto_render(..., execute_params = list(report_date = ...))
+# which arrives here as params$report_date. This only affects HOW the date is
+# supplied, not the report content.
+# ---------------------------------------------------------------------------
+if (is.null(params$report_date))
+  stop("report_date not supplied — set it via execute_params in 00_Run the report.R")
+report_date <- as.Date(params$report_date)
+
+# Source all the scripts
+source(here::here("scripts", "0_functions.R"))
+source(here::here("scripts", "0_style.R"))
+source(here::here("scripts", "0_header.R"))
+# source(here::here("scripts", "2_summary.R"))
+source(here::here("scripts", "1_import_data.R"))
+source(here::here("scripts", "2_data_cleaning.R"))
+source(here::here("scripts", "3_create_summary_table.R"))
+source(here::here("scripts", "4_epicurve.R"))
+source(here::here("scripts", "5_map_cases.R"))
+source(here::here("scripts", "6_pyramid.R"))
+source(here::here("scripts", "7_cfr.R"))
+source(here::here("scripts", "8_trend.R"))
+source(here::here("scripts", "9_cumm_table.R"))
+source(here::here("scripts", "highlights.R"))
+```
+
+```{r ncdc}
+ncdc
+```
+
+```{r title}
+title
+```
+
+```{r highlight}
+# officedown's rdocx implicitly merged a printed ftext (key_points) with a
+# following fp_par (header_par) into ONE shaded paragraph, so "Key Points"
+# rendered inside the yellow bar. Quarto's docx writer does not merge them,
+# which left "Key Points" above an empty yellow bar. Combining them explicitly
+# with fpar() reproduces the .Rmd result. (Uses the same objects sourced from
+# 0_header.R / 0_style.R — no change to those scripts.)
+fpar(key_points, fp_p = header_par)
+```
+
+```{r}
+table1_title
+```
+
+```{r}
+Summary_table_ft
+```
+
+```{r}
+highlight
+```
+
+
+- `r highlight1`^[`r footnote_confirmed`]
+
+- `r highlight2`
+
+- `r highlight3`
+
+- `r highlight4`
+
+- `r highlight5`
+
+- `r highlight6`
+
+- `r highlight7`
+
+- National Cholera multi-partner, multi-sectoral Technical Working Group (TWG)                  continues coordinating the response activities at all levels
+
+{{< pagebreak >}}
+
+```{r fig.width=6.8, fig.height=3.5}
+epicurve
+fig1_title
+```
+
+&nbsp;
+&nbsp;
+
+```{r fig.width=6.8, fig.height=4.5}
+# Map chunk uses a taller fig.height so Nigeria fills the page and the
+# manual scale bar (drawn inside the map at lat ~3.85) sits flush against
+# the southern coast with no whitespace.
+chol_map
+fig2_title
+```
+
+{{< pagebreak >}}
+```{r fig.width=6.8, fig.height=4}
+age_pyramid_plot
+fig3_title
+```
+
+&nbsp;
+
+```{r fig.width=6.8, fig.height=4}
+combo_chart
+fig4_title
+```
+
+
+{{< pagebreak >}}
+```{r fig.width=6.8, fig.height=4}
+trend_year_plot
+fig5_title
+
+```
+
+&nbsp;
+
+```{r}
+table2_title
+cumm_table
+```
+
+&nbsp;
+
+```{r}
+chall
+```
+
+&nbsp;
+
+```{r}
+recomm
+```
+
+-
+-
